@@ -1,10 +1,19 @@
-"""Entry point used by the Databricks Job defined in `databricks_bundle/`.
+"""Secondary entry point for running the custom PipelineRunner as a
+Databricks python_wheel_task, instead of via a generated Lakeflow
+Declarative Pipeline.
+
+The primary, recommended way to run tars on Databricks is
+`tars generate-dlt` + the pipeline resource in `databricks_bundle/` --
+serverless, native Auto Loader/AI Functions, no cluster to manage. This
+entry point exists for the cases the DLT codegen doesn't cover (a source
+plugin with no codegen support, a sink that needs arbitrary side effects,
+local iteration against a real workspace) by running the exact same
+`PipelineRunner` the CLI and the test suite use, just as a wheel task
+instead of `tars run` on your laptop.
 
 A Databricks Workflow task running a Python wheel calls a module function,
 not a CLI -- so this simply re-parses the same `--config`/`--pipeline`/
-`--router` arguments `tars run` accepts (as Databricks Job parameters) and
-delegates to the same `PipelineRunner` the CLI uses, keeping the two
-invocation paths in lockstep.
+`--router` arguments `tars run` accepts (as Databricks Job parameters).
 """
 
 from __future__ import annotations

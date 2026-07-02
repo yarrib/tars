@@ -1,8 +1,8 @@
-# Event-driven ingestion job: fires when new files land in the Unity
-# Catalog Volume watched by the router's `source.autoloader`, runs
-# router-driven ingestion once (Auto Loader itself tracks already-seen
-# files via its own checkpoint, so `availableNow` triggers are safe to
-# re-fire on a schedule too).
+# Thin, serverless trigger wrapper: fires the shared Lakeflow Declarative
+# Pipeline (resources/pipeline.yml) when new files land in the Unity
+# Catalog Volume it watches. A `pipeline_task` needs no cluster spec of
+# its own -- the pipeline resource carries its own (serverless) compute --
+# so this job has no job_clusters/new_cluster anywhere.
 resources:
   jobs:
     tars_ingestion_job:
@@ -14,32 +14,10 @@ resources:
           min_time_between_triggers_seconds: 60
           wait_after_last_change_seconds: 30
 
-      job_clusters:
-        - job_cluster_key: tars_cluster
-          new_cluster:
-            spark_version: 15.4.x-scala2.12
-            node_type_id: "${var.node_type_id}"
-            num_workers: 1
-            data_security_mode: SINGLE_USER
-
       tasks:
-        - task_key: run_router
-          job_cluster_key: tars_cluster
-          python_wheel_task:
-            package_name: tars
-            entry_point: tars-databricks-job
-            parameters:
-              - "--config"
-              - "${var.config_path}"
-              - "--router"
-          libraries:
-            - whl: ../../dist/*.whl
-          # classifier.databricks_ai / parser.databricks_ai call Databricks'
-          # built-in ai_classify()/ai_parse_document()/ai_query() SQL
-          # functions, which run on a Databricks-governed model endpoint --
-          # no external API key or extra library needed. If you swap in
-          # classifier.ai/parser.ai (direct Anthropic calls) instead, add
-          # `anthropic` as a pypi library and an ANTHROPIC_API_KEY secret here.
+        - task_key: run_pipeline
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.tars_pipeline.id}
 
       email_notifications:
         on_failure:

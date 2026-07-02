@@ -97,3 +97,17 @@ def test_keyword_classifier():
 
 No Databricks cluster, LLM API key, or `tars` config file needed to unit
 test a plugin in isolation -- only `tars run`/`tars validate` need those.
+
+## A custom plugin and `tars generate-dlt`
+
+A custom plugin registered via `plugins:`/entry points works immediately
+under `tars run` (the local `PipelineRunner`). It does **not**
+automatically get `tars generate-dlt` (Lakeflow Declarative Pipeline)
+codegen support -- `tars/databricks/dlt_codegen.py` only knows how to
+compile the specific built-in plugins listed in the README's plugin table
+into native Spark/SQL expressions. Using a custom source/classifier/parser
+in a config that also runs through `tars generate-dlt` will raise a clear
+`DltCodegenError` naming the unsupported plugin, rather than silently
+skipping it. If you need a custom plugin on Databricks, either add codegen
+support for it in that module, or run it via the entrypoint job
+(`tars.databricks.entrypoint`) instead of generated DLT code.

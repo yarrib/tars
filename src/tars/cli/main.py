@@ -3,7 +3,8 @@
     tars validate -c configs/examples          # load + validate config, build every pipeline
     tars list-plugins                          # show what's registered, built-in and custom
     tars run -c configs/examples --pipeline invoice_pipeline
-    tars run -c configs/examples --router      # router-driven: one source, many pipelines
+    tars run -c configs/examples --router      # router-driven: one source, many pipelines (local/offline dev)
+    tars generate-dlt -c configs/examples -o generated   # emit Lakeflow Declarative Pipeline source (Databricks)
     tars init pipeline my_new_pipeline         # scaffold a new pipeline YAML file
 """
 
@@ -17,6 +18,7 @@ from pathlib import Path
 import click
 
 from tars.config.loader import ConfigError, load_config
+from tars.databricks.dlt_codegen import DltCodegenError, write_generated_files
 from tars.pipeline.builder import build_pipeline
 from tars.pipeline.context import PipelineContext
 from tars.pipeline.runner import PipelineRunner
@@ -109,6 +111,32 @@ def run(config_path: str, pipeline_name: str | None, use_router: bool) -> None:
         context = runner.run_pipeline(pipeline_name)
 
     click.echo(json.dumps({"run_id": context.run_id, "stats": context.stats}, indent=2))
+
+
+@cli.command("generate-dlt")
+@click.option("-c", "--config", "config_path", required=True, type=click.Path(exists=True))
+@click.option("-o", "--output-dir", "output_dir", required=True, type=click.Path())
+def generate_dlt(config_path: str, output_dir: str) -> None:
+    """Generate Lakeflow Declarative Pipeline (DLT) source from config.
+
+    Emits one shared pipeline file covering every router-dispatched
+    pipeline (adding a route in YAML adds a table here, not a new job),
+    plus one file per `deploy.dedicated` or standalone pipeline. Run this
+    before `databricks bundle deploy`.
+    """
+    try:
+        app_config = load_config(config_path)
+        written = write_generated_files(app_config, Path(output_dir), config_path=config_path)
+    except ConfigError as exc:
+        click.secho(f"Invalid config: {exc}", fg="red", err=True)
+        sys.exit(1)
+    except DltCodegenError as exc:
+        click.secho(f"Cannot generate Lakeflow Declarative Pipeline source: {exc}", fg="red", err=True)
+        sys.exit(1)
+
+    for path in written:
+        click.echo(f"Wrote {path}")
+    click.secho(f"OK: generated {len(written)} file(s) in {output_dir}", fg="green")
 
 
 @cli.command()

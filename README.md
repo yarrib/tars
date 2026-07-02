@@ -8,17 +8,24 @@ code; the four moving parts (sources, classifiers, parsers, sinks) are all
 plugins, so extending the system means writing a small Python class and
 declaring it in config -- not forking the framework.
 
-- **Event-driven and API ingestion**: Databricks Auto Loader (`cloudFiles`)
-  for landing-zone/Volume ingestion, or push-based ingestion via a direct
-  Python call or an HTTP webhook.
+- **Event-driven ingestion, serverless**: `tars` compiles your YAML config
+  into a serverless Databricks Lakeflow Declarative Pipeline -- Auto
+  Loader (`cloudFiles`) for document bytes landing in a Volume, or Zerobus
+  for low-latency metadata/event records. No cluster spec anywhere in the
+  generated bundle.
 - **Declarative pipeline builder**: each pipeline (`source -> classify ->
-  parse -> sink(s)`) is a YAML document; `tars` builds and validates it.
-- **Document router**: a shared classifier chain assigns a `doc_type` to
-  every incoming document and dispatches it to the pipeline configured to
-  handle that type.
-- **AI parse doc**: structured field extraction via an LLM -- either
-  Databricks' built-in `ai_parse_document()`/`ai_query()` SQL functions
-  (governed, no external API key) or a direct Anthropic call, your choice.
+  parse -> sink(s)`) is a YAML document; `tars generate-dlt` compiles it
+  to native `@dlt.table` code and Databricks' own engine runs it.
+- **Document router, routes not jobs**: a shared classifier chain assigns
+  a `doc_type` to every incoming document and dispatches it to the
+  pipeline configured to handle that type. Adding a route in YAML adds a
+  table to the *same* generated pipeline -- it doesn't provision a new
+  Databricks Job or Pipeline, unless that pipeline opts in via
+  `deploy: {dedicated: true}`.
+- **AI parse doc**: structured field extraction via an LLM -- Databricks'
+  built-in `ai_parse_document()`/`ai_query()` SQL functions by default
+  (governed, columnar, no external API key), or a direct Anthropic call
+  when you need it (compiled to a pandas UDF).
 - **Plugin system**: sources, classifiers, parsers, and sinks are all
   swappable; register your own via a Python entry point or declare one
   directly in YAML (`plugins: [{name, python_path}]`).
@@ -44,6 +51,26 @@ text, and `sink.volume` writes one JSON record per document to
 production-shaped version (Auto Loader, Databricks AI Functions, Delta
 Lake sinks) and `databricks_bundle/` for the matching Asset Bundle.
 
+## Two execution engines, one config
+
+The same YAML config drives two different execution paths:
+
+- **`tars generate-dlt`** (primary, for Databricks) compiles the config
+  into a serverless Lakeflow Declarative Pipeline -- Databricks' own
+  engine handles orchestration, incremental state, and autoscaling. This
+  is what `databricks_bundle/` deploys.
+- **`tars run`** (the custom `PipelineRunner`) executes the same config
+  directly in a Python process. No cluster, no workspace -- this is the
+  local/offline dev-and-test path (what the Quick Start above uses, and
+  what the test suite exercises), and a fallback for source/sink plugins
+  that have no DLT codegen support.
+
+Not every plugin combination compiles to both engines identically --
+`classifier.databricks_ai`/`parser.databricks_ai` compile to native
+columnar SQL function calls under codegen, while `classifier.ai`/`parser.ai`
+(direct Anthropic) compile to a pandas UDF wrapping the same plugin class
+`tars run` uses. Both work under `tars run` regardless.
+
 ## Architecture
 
 ```
@@ -64,10 +91,14 @@ Lake sinks) and `databricks_bundle/` for the matching Asset Bundle.
          └───────────────────────────────────────┘
 ```
 
-A pipeline doesn't need to be reached through the router at all -- give it
-its own `source` and run it standalone with `tars run --pipeline NAME`.
-Router-driven ingestion (`tars run --router`) is for the common case of
-one landing zone feeding many document types into different destinations.
+Under `tars generate-dlt`, the Source+Router+every non-dedicated Pipeline
+above compile into *one* generated file (one Lakeflow pipeline): Source
+becomes a bronze `@dlt.table`, the Router's classifier chain becomes a
+`doc_type` column on a classified `@dlt.table`, and each Pipeline becomes
+a gold `@dlt.table` filtered to its `doc_type`(s). A pipeline doesn't need
+to be reached through the router at all -- give it its own `source` and
+it's compiled as its own standalone pipeline/file instead (or run it
+directly with `tars run --pipeline NAME` under the local runner).
 
 ### Config layout
 
@@ -92,10 +123,15 @@ dev/staging/prod by swapping environment variables, not files.
 
 | Kind         | Contract                                   | Built-ins |
 |--------------|---------------------------------------------|-----------|
-| `source.*`     | `discover(context) -> Iterator[Document]`  | `source.autoloader` (Auto Loader), `source.volume_listener` (poll a directory / UC Volume), `source.api` (push/webhook) |
-| `classifier.*` | `classify(document, context) -> str \| None` | `classifier.rule_based` (extension/filename/mime rules), `classifier.ai` (Anthropic), `classifier.databricks_ai` (`ai_classify()`) |
-| `parser.*`     | `parse(document, context) -> dict`         | `parser.text` (passthrough), `parser.ai` (Anthropic tool-use extraction), `parser.databricks_ai` (`ai_parse_document()` + `ai_query()`) |
-| `sink.*`       | `write(document, context) -> None`         | `sink.volume` (JSON files on a Volume/local dir), `sink.delta` (Delta Lake table, batched) |
+| `source.*`     | `discover(context) -> Iterator[Document]`  | `source.autoloader` (Auto Loader, **recommended for document bytes**), `source.zerobus` (low-latency metadata/event records, not raw file content -- see its docstring), `source.volume_listener` (poll a directory / UC Volume, local-runner only), `source.api` (push/webhook, local-runner only) |
+| `classifier.*` | `classify(document, context) -> str \| None` | `classifier.rule_based` (extension/filename/mime rules), `classifier.databricks_ai` (**recommended**, native `ai_classify()`), `classifier.ai` (direct Anthropic, compiles to a pandas UDF under codegen) |
+| `parser.*`     | `parse(document, context) -> dict`         | `parser.text` (passthrough), `parser.databricks_ai` (**recommended**, native `ai_parse_document()` + `ai_query()`), `parser.ai` (direct Anthropic tool-use, compiles to a pandas UDF under codegen) |
+| `sink.*`       | `write(document, context) -> None`         | `sink.delta` (Delta Lake table, **the real DLT codegen sink**), `sink.volume` (JSON files on a Volume/local dir -- local-runner only; under codegen it falls back to a plain Delta table with a warning, since DLT can't write arbitrary files) |
+
+`source.autoloader`/`source.zerobus` and `classifier.databricks_ai`/
+`parser.databricks_ai` are the only plugins with `tars generate-dlt`
+codegen support beyond the Anthropic-direct UDF path; anything else runs
+under `tars run` (the local `PipelineRunner`) only.
 
 Full plugin list for your environment (including any custom ones declared
 in config): `tars list-plugins -c <config>`.
@@ -105,8 +141,9 @@ in config): `tars list-plugins -c <config>`.
 ```
 tars validate -c <config>                    # load + build every pipeline, no execution
 tars list-plugins [--kind source|classifier|parser|sink]
-tars run -c <config> --pipeline NAME          # run one self-contained pipeline
-tars run -c <config> --router                 # run router-driven ingestion
+tars generate-dlt -c <config> -o <dir>        # compile to Lakeflow Declarative Pipeline source (primary, Databricks)
+tars run -c <config> --pipeline NAME          # run one self-contained pipeline (local/offline)
+tars run -c <config> --router                 # run router-driven ingestion (local/offline)
 tars init pipeline NAME [-o DIR]              # scaffold a new pipeline YAML
 ```
 
@@ -140,17 +177,25 @@ See `docs/plugin-development.md` for the full guide.
 
 ## Databricks deployment
 
-`databricks_bundle/` is a Databricks Asset Bundle wiring `tars run
---router` into a Job triggered by file arrival in a Unity Catalog Volume:
+`databricks_bundle/` is a Databricks Asset Bundle deploying the generated
+Lakeflow Declarative Pipeline, serverless throughout, plus a thin Job that
+triggers it on file arrival in a Unity Catalog Volume:
 
 ```bash
+tars generate-dlt -c configs/examples/databricks -o databricks_bundle/generated
 cd databricks_bundle
 databricks bundle deploy -t dev
 databricks bundle run -t dev tars_ingestion_job
 ```
 
-It deploys `configs/examples/databricks` as the job's config -- point
-`var.config_path` at your own config directory for a real deployment.
+Regenerate (`tars generate-dlt`) whenever the config changes, then
+redeploy. It targets `configs/examples/databricks` by default -- point
+`var.config_path` (and the `catalog`/`schema` variables) at your own
+config for a real deployment. Adding a pipeline that's reachable via
+`router.routes`/`default_pipeline` adds a table to the existing
+`tars_pipeline` resource; only pipelines marked `deploy: {dedicated: true}`
+get their own generated file and need their own resource block in
+`resources/pipeline.yml`.
 
 ## Development
 

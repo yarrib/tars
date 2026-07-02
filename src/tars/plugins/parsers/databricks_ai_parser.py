@@ -58,7 +58,7 @@ class DatabricksAiParser(Parser):
             ) from exc
         return SparkSession.getActiveSession() or SparkSession.builder.getOrCreate()
 
-    def _schema(self) -> dict[str, Any]:
+    def schema(self) -> dict[str, Any]:
         if self.json_schema is not None:
             return self.json_schema
         properties: dict[str, Any] = {}
@@ -91,7 +91,7 @@ class DatabricksAiParser(Parser):
                 else str(parsed)
             )
             text = (parsed_text or "")[: self.max_content_chars]
-            schema_json = json.dumps(self._schema())
+            schema_json = json.dumps(self.schema())
             extract_row = spark.sql(
                 "SELECT ai_query(:endpoint, :prompt, responseFormat => :schema) AS extracted",
                 args={

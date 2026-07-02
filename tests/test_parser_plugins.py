@@ -73,7 +73,7 @@ def test_ai_parser_optional_fields_are_not_required() -> None:
         {"fields": [{"name": "a"}, {"name": "b", "required": False}]},
         client=_FakeAnthropicClient({"a": "x"}),
     )
-    schema = parser._build_schema()
+    schema = parser.schema()
     assert schema["required"] == ["a"]
 
 

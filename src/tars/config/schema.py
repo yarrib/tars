@@ -75,6 +75,18 @@ class RouterConfig(StrictModel):
         return self.default_pipeline
 
 
+class DeployConfig(StrictModel):
+    """Controls how this pipeline is materialized when deploying to
+    Databricks. The default (`dedicated=False`) adds the pipeline as a
+    route/table inside the *shared* generated Lakeflow Declarative
+    Pipeline -- no new Databricks Job or Pipeline resource is created.
+    Set `dedicated=True` only when a pipeline genuinely needs its own
+    compute/schedule/permissions boundary (e.g. a much heavier workload,
+    or one that must scale/fail independently of the rest)."""
+
+    dedicated: bool = False
+
+
 class PipelineConfig(StrictModel):
     """A single declarative ingestion pipeline: optional source (pipelines
     reached only via the router don't need their own), then classify,
@@ -88,6 +100,7 @@ class PipelineConfig(StrictModel):
     sinks: list[PluginRef] = Field(default_factory=list)
     on_error: Literal["skip", "fail", "dead_letter"] = "skip"
     dead_letter_sink: PluginRef | None = None
+    deploy: DeployConfig = Field(default_factory=DeployConfig)
 
     @model_validator(mode="after")
     def _dead_letter_requires_sink(self) -> "PipelineConfig":

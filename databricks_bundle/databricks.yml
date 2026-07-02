@@ -1,6 +1,15 @@
 # Databricks Asset Bundle for tars.
 #
-# Deploy + run:
+# Everything here is serverless -- no cluster spec anywhere in this bundle.
+# The Lakeflow Declarative Pipeline resource (resources/pipeline.yml) does
+# the actual ingest/classify/parse/write work; the Job (resources/job.yml)
+# just triggers it on file arrival. Adding a pipeline in tars YAML config
+# adds a table to that one generated pipeline -- it does not create a new
+# Job or Pipeline resource here, unless that pipeline sets
+# `deploy: {dedicated: true}` in its config.
+#
+# Deploy:
+#   tars generate-dlt -c ../configs/examples/databricks -o generated   # regenerate first
 #   databricks bundle deploy -t dev
 #   databricks bundle run -t dev tars_ingestion_job
 #
@@ -12,18 +21,27 @@ variables:
   config_path:
     description: "Path (inside the deployed bundle) to the tars config directory."
     default: configs/examples/databricks
-  node_type_id:
-    description: "Cloud-specific worker node type (e.g. i3.xlarge on AWS, Standard_DS3_v2 on Azure)."
-    default: Standard_DS3_v2
+  catalog:
+    description: "Unity Catalog catalog the generated pipeline writes into."
+    default: main
+  schema:
+    description: "Unity Catalog schema (target) the generated pipeline writes into."
+    default: docs
   landing_volume_path:
     description: "Unity Catalog Volume path the file-arrival trigger watches."
     default: /Volumes/main/landing/raw_docs
 
-artifacts:
-  tars_wheel:
-    type: whl
-    build: python -m build --wheel
-    path: ../
+# Only needed if your config uses classifier.ai/parser.ai (direct Anthropic
+# calls, compiled to a pandas UDF that imports the `tars` package at
+# runtime). The native classifier.databricks_ai/parser.databricks_ai path
+# needs no extra dependency -- generated code for that path only imports
+# `dlt` and `pyspark.sql.functions`. Uncomment if you need it:
+#
+# artifacts:
+#   tars_wheel:
+#     type: whl
+#     build: python -m build --wheel
+#     path: ../
 
 include:
   - resources/*.yml

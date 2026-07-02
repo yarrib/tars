@@ -63,7 +63,7 @@ class AiParser(Parser):
             self._client = anthropic.Anthropic(api_key=api_key)
         return self._client
 
-    def _build_schema(self) -> dict[str, Any]:
+    def schema(self) -> dict[str, Any]:
         if self.json_schema is not None:
             return self.json_schema
         properties: dict[str, Any] = {}
@@ -86,7 +86,7 @@ class AiParser(Parser):
         tool = {
             "name": "extract_fields",
             "description": self.instructions,
-            "input_schema": self._build_schema(),
+            "input_schema": self.schema(),
         }
         response = self.client.messages.create(
             model=self.model,

@@ -11,4 +11,5 @@ venv/
 data/
 .tars_checkpoint.json
 databricks_bundle/dist/
+databricks_bundle/generated/
 .databricks/
