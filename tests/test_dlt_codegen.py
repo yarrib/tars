@@ -31,7 +31,7 @@ def test_shared_group_generates_one_valid_file(databricks_app_config: AppConfig)
     assert 'name="contracts"' in source
     assert 'name="unclassified_pipeline"' in source
     # adding a route added a table, not a new file/job
-    assert source.count("@dlt.table") == 5
+    assert source.count("@dp.table") == 5
 
 
 def test_rule_based_and_databricks_ai_classifiers_combine_via_coalesce(databricks_app_config: AppConfig) -> None:
@@ -77,7 +77,7 @@ def test_dedicated_pipeline_with_own_source_gets_its_own_file() -> None:
     ast.parse(source)
     assert 'name="special"' in source
     # no classifiers on this pipeline -> no classified layer, just bronze + gold
-    assert source.count("@dlt.table") == 2
+    assert source.count("@dp.table") == 2
     assert "classified" not in source
 
 

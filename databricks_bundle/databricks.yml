@@ -35,7 +35,7 @@ variables:
 # calls, compiled to a pandas UDF that imports the `tars` package at
 # runtime). The native classifier.databricks_ai/parser.databricks_ai path
 # needs no extra dependency -- generated code for that path only imports
-# `dlt` and `pyspark.sql.functions`. Uncomment if you need it:
+# `dp` (pyspark.pipelines) and `pyspark.sql.functions`. Uncomment if you need it:
 #
 # artifacts:
 #   tars_wheel:

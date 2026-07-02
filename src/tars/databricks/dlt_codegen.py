@@ -3,11 +3,14 @@ Tables) source code from a tars `AppConfig`.
 
 This is the primary way tars runs on Databricks: rather than orchestrating
 a Python loop ourselves, we translate the declarative YAML config into
-native `@dlt.table` definitions and hand orchestration, incremental
-state, and (serverless) compute entirely to Databricks' own engine. The
-custom `PipelineRunner` (tars.pipeline.runner) still exists, but is now
-positioned as the local/offline dev-and-test path -- it needs no cluster
-and no Databricks workspace, which this generated code very much does.
+native `@dp.table` definitions (`from pyspark import pipelines as dp` --
+the current Lakeflow Declarative Pipelines convention, superseding the
+legacy `import dlt` / `@dlt.table` spelling) and hand orchestration,
+incremental state, and (serverless) compute entirely to Databricks' own
+engine. The custom `PipelineRunner` (tars.pipeline.runner) still exists,
+but is now positioned as the local/offline dev-and-test path -- it needs
+no cluster and no Databricks workspace, which this generated code very
+much does.
 
 Opinionated defaults baked into this module (see docs/plugin-development.md
 and the source plugin docstrings for the reasoning):

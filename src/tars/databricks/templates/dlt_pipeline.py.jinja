@@ -5,7 +5,7 @@ your tars YAML config: `tars generate-dlt -c {{ config_path }} -o <dir>`.
 Group: {{ group_name }}
 """
 
-import dlt
+from pyspark import pipelines as dp
 from pyspark.sql import functions as F
 {% for imp in extra_imports %}
 {{ imp }}
@@ -16,7 +16,7 @@ from pyspark.sql import functions as F
 {% endfor %}
 
 
-@dlt.table(
+@dp.table(
     name="{{ bronze.table_name }}",
     comment="Raw documents landed via {{ bronze.source_kind }}.",
 )
@@ -25,12 +25,12 @@ def {{ bronze.function_name }}():
 
 {% if has_classified %}
 
-@dlt.table(
+@dp.table(
     name="{{ classified.table_name }}",
     comment="Documents from {{ bronze.table_name }} with doc_type assigned by the router's classifier chain.",
 )
 def {{ classified.function_name }}():
-    df = dlt.read_stream("{{ bronze.table_name }}")
+    df = dp.read_stream("{{ bronze.table_name }}")
     return df.withColumn(
         "doc_type",
 {{ classify_expr }}
@@ -39,12 +39,12 @@ def {{ classified.function_name }}():
 {% for gold in gold_tables %}
 
 
-@dlt.table(
+@dp.table(
     name="{{ gold.table_name }}",
     comment="{{ gold.comment }}",
 )
 def {{ gold.function_name }}():
-    df = dlt.read_stream("{{ read_table }}").where({{ gold.filter_expr }})
+    df = dp.read_stream("{{ read_table }}").where({{ gold.filter_expr }})
 {% for col in gold.columns %}
     df = df.withColumn("{{ col.name }}", {{ col.expr }})
 {% endfor %}

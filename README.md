@@ -15,7 +15,7 @@ declaring it in config -- not forking the framework.
   generated bundle.
 - **Declarative pipeline builder**: each pipeline (`source -> classify ->
   parse -> sink(s)`) is a YAML document; `tars generate-dlt` compiles it
-  to native `@dlt.table` code and Databricks' own engine runs it.
+  to native `@dp.table` code and Databricks' own engine runs it.
 - **Document router, routes not jobs**: a shared classifier chain assigns
   a `doc_type` to every incoming document and dispatches it to the
   pipeline configured to handle that type. Adding a route in YAML adds a
@@ -93,9 +93,9 @@ columnar SQL function calls under codegen, while `classifier.ai`/`parser.ai`
 
 Under `tars generate-dlt`, the Source+Router+every non-dedicated Pipeline
 above compile into *one* generated file (one Lakeflow pipeline): Source
-becomes a bronze `@dlt.table`, the Router's classifier chain becomes a
-`doc_type` column on a classified `@dlt.table`, and each Pipeline becomes
-a gold `@dlt.table` filtered to its `doc_type`(s). A pipeline doesn't need
+becomes a bronze `@dp.table`, the Router's classifier chain becomes a
+`doc_type` column on a classified `@dp.table`, and each Pipeline becomes
+a gold `@dp.table` filtered to its `doc_type`(s). A pipeline doesn't need
 to be reached through the router at all -- give it its own `source` and
 it's compiled as its own standalone pipeline/file instead (or run it
 directly with `tars run --pipeline NAME` under the local runner).
