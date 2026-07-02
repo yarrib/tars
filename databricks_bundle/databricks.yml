@@ -1,0 +1,44 @@
+# Databricks Asset Bundle for tars.
+#
+# Deploy + run:
+#   databricks bundle deploy -t dev
+#   databricks bundle run -t dev tars_ingestion_job
+#
+# See https://docs.databricks.com/dev-tools/bundles/ for the full DAB spec.
+bundle:
+  name: tars
+
+variables:
+  config_path:
+    description: "Path (inside the deployed bundle) to the tars config directory."
+    default: configs/examples/databricks
+  node_type_id:
+    description: "Cloud-specific worker node type (e.g. i3.xlarge on AWS, Standard_DS3_v2 on Azure)."
+    default: Standard_DS3_v2
+  landing_volume_path:
+    description: "Unity Catalog Volume path the file-arrival trigger watches."
+    default: /Volumes/main/landing/raw_docs
+
+artifacts:
+  tars_wheel:
+    type: whl
+    build: python -m build --wheel
+    path: ../
+
+include:
+  - resources/*.yml
+
+targets:
+  dev:
+    mode: development
+    default: true
+    workspace:
+      host: https://<your-workspace-instance>.cloud.databricks.com
+
+  prod:
+    mode: production
+    workspace:
+      host: https://<your-workspace-instance>.cloud.databricks.com
+      root_path: /Shared/.bundle/${bundle.name}/${bundle.target}
+    run_as:
+      service_principal_name: <your-service-principal-application-id>

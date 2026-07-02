@@ -1,0 +1,13 @@
+# Fully offline example: no Databricks cluster, no LLM API key required.
+# Run it with:
+#   tars run -c configs/examples/local --router
+#
+# `plugins:` is where you declare custom plugins that aren't installed as
+# Python entry points -- e.g. ones you wrote yourself for this repo. This
+# example only uses tars' built-ins, so the list is empty:
+#
+#   plugins:
+#     - name: classifier.my_custom_rule
+#       python_path: my_org.tars_plugins.my_module.MyCustomClassifier
+version: 1
+plugins: []

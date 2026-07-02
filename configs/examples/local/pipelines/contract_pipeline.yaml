@@ -1,0 +1,9 @@
+pipelines:
+  - name: contract_pipeline
+    description: "Handles documents the router classified as contracts."
+    parser:
+      name: parser.text
+    sinks:
+      - name: sink.volume
+        config:
+          path: ${TARS_OUTPUT_DIR:-./data/processed}/contracts
