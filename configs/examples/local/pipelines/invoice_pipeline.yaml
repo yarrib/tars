@@ -1,9 +1,0 @@
-pipelines:
-  - name: invoice_pipeline
-    description: "Handles documents the router classified as invoices."
-    parser:
-      name: parser.text
-    sinks:
-      - name: sink.volume
-        config:
-          path: ${TARS_OUTPUT_DIR:-./data/processed}/invoices

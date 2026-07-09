@@ -1,9 +1,0 @@
-pipelines:
-  - name: unclassified_pipeline
-    description: "Catch-all for anything the router's rules didn't match."
-    parser:
-      name: parser.text
-    sinks:
-      - name: sink.volume
-        config:
-          path: ${TARS_OUTPUT_DIR:-./data/processed}/unclassified
