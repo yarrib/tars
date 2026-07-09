@@ -29,8 +29,8 @@ flowchart LR
     B --> SP[silver.parsed_docs\nai_parse_document, cached by pdf_hash]
     B --> SG[silver.ground_truth\nXML → long format, cached by xml_hash]
     B --> SA[bronze.split_assignments\nsticky client-level splits]
-    P[gold.prompts\nprompt registry] --> X
-    SP --> X[gold.extractions\nai_query + structured output]
+    P[gold.extract_specs\nschema registry] --> X
+    SP --> X[gold.extractions\nai_extract v2.1\nconfidence + citations]
     X --> E[gold.eval_results]
     SG --> E
     SA --> E
@@ -128,83 +128,91 @@ Field-name normalization (XML tag → canonical field name per doc type) lives i
 mapping table, `silver.field_map(doc_type, xml_field, canonical_field)`, editable
 without code changes.
 
-## 4. Extraction layer — `ai_query`, not `ai_extract`
+## 4. Extraction layer — `ai_extract` v2.1
 
-`ai_extract(content, array('field', ...))` accepts only field names: **no custom
-prompt, no confidence, no citations.** All three requirements point to
-`ai_query` with structured output:
+`ai_extract` version 2.1 provides everything this pipeline needs natively: per-field
+**confidence scores** and **offset-grounded citations**, enabled via the options map.
+Pin the version explicitly so behavior never shifts under you:
 
 ```sql
-ai_query(
-  'databricks-claude-sonnet-4-5',
-  p.prompt_text || '\n\n<document>\n' || d.parsed_text || '\n</document>',
-  responseFormat => p.response_schema   -- JSON schema, stored in the prompt registry
+ai_extract(
+  d.parsed_text,                -- also accepts the ai_parse_document VARIANT directly
+  s.extraction_schema,          -- JSON schema string with per-field descriptions
+  map(
+    'version', '2.1',
+    'enableConfidenceScores', 'true',
+    'enableCitations', 'true'
+  )
 )
 ```
 
-Response schema shape (per doc type, stored alongside the prompt):
+Output is a VARIANT shaped like:
 
-```json
-{ "type": "json_schema", "json_schema": { "name": "tax_extraction", "schema": {
-  "type": "object", "properties": { "fields": { "type": "array", "items": {
-    "type": "object", "properties": {
-      "name":       { "type": "string" },
-      "value":      { "type": ["string", "null"] },
-      "confidence": { "type": "number", "description": "0.0-1.0" },
-      "evidence":   { "type": "string", "description": "verbatim quote from the document" },
-      "page":       { "type": "integer" }
-    }, "required": ["name", "value", "confidence", "evidence", "page"]
-  } } } } } }
+```
+{
+  response: {
+    <field>: { value, confidence, citation_ids: [0, ...] },
+    ...
+  },
+  metadata: { citations: [ { id, start, stop }, ... ] },
+  error_message
+}
 ```
 
-### `gold.prompts` — the registry non-coders edit
+Three properties worth designing around:
+
+- **Citations are character offsets** (`start`/`stop` into the input text), not
+  model-quoted strings — grounded by construction, so there is no hallucinated-citation
+  problem. Materialize the cited text with `substring(parsed_text, start, stop)` at
+  write time so reviewers see the span without touching offsets.
+- **Confidence is per field**, 0–1. It still needs **calibration** before non-coders
+  use it as an auto-accept threshold — that's what the eval layer measures.
+- **The schema is the prompting surface.** Field descriptions embedded in the
+  extraction schema are where iteration happens ("the total tax due, from line 24, as
+  a number with no currency symbol"). Schema limits: 128 fields, 7 nesting levels.
+
+Escape hatch: if a doc type needs cross-field reasoning or guidance beyond what field
+descriptions can express, that spec can use `ai_query` with structured output instead —
+the registry's `method` column keeps both under the same experiment framework, same
+caching, same eval.
+
+### `gold.extract_specs` — the registry non-coders edit
 
 | column | type | notes |
 |---|---|---|
-| `prompt_id` | STRING | PK, e.g. `1040-v3` |
+| `spec_id` | STRING | PK, e.g. `1040-v3` |
 | `doc_type` | STRING | |
-| `prompt_text` | STRING | |
-| `response_schema` | STRING | JSON schema above |
-| `model` | STRING | endpoint name |
+| `method` | STRING | `ai_extract` (default) \| `ai_query` (escape hatch) |
+| `extraction_schema` | STRING | JSON schema with per-field descriptions |
+| `prompt_text` | STRING | nullable; only for `ai_query` specs |
+| `model` | STRING | nullable; only for `ai_query` specs |
 | `created_by`, `created_at`, `notes` | | |
 
-Prompts are **append-only**: a change is a new `prompt_id`, never an edit in place —
-that's what makes results comparable and cache keys stable.
+Specs are **append-only**: a change is a new `spec_id`, never an edit in place — that's
+what makes results comparable and cache keys stable.
 
-### `gold.extractions` — one row per (document, prompt, field)
+### `gold.extractions` — one row per (document, spec, field)
 
 | column | type | notes |
 |---|---|---|
 | `pdf_hash` | STRING | ┐ |
-| `prompt_id` | STRING | ├ uniqueness key |
+| `spec_id` | STRING | ├ uniqueness key |
 | `field_name` | STRING | ┘ |
 | `pair_id`, `doc_type`, `split` | | denormalized for easy filtering |
 | `value` | STRING | |
-| `confidence` | DOUBLE | model-reported, 0–1 |
-| `evidence_text` | STRING | verbatim quote |
-| `evidence_page` | INT | |
-| `citation_verified` | BOOLEAN | see below |
-| `model`, `extracted_at` | | |
+| `confidence` | DOUBLE | from `ai_extract`, 0–1 |
+| `citations` | ARRAY\<STRUCT\<start INT, stop INT, text STRING\>\> | offsets + materialized span |
+| `error_message` | STRING | from the function output; check before trusting `value` |
+| `extracted_at` | TIMESTAMP | |
 
-Incremental rule: for the selected `prompt_id` and split, run only pairs with no row in
-`extractions` for that `(pdf_hash, prompt_id)`. Old prompt versions' results stay put —
-re-running prompt v2 after trying v3 costs nothing.
-
-### Citation verification — trust but check
-
-Self-reported citations hallucinate. After extraction, verify mechanically:
-whitespace-normalize `evidence_text` and check it appears as a substring of the parsed
-text for `evidence_page` (fall back to whole-doc match, recording the looser result).
-Set `citation_verified` accordingly. In the review UI, an unverified citation is a red
-flag on the row regardless of confidence.
-
-The same caveat applies to `confidence`: it's the model's self-assessment, useful only
-once **calibrated** — which is exactly what the eval layer measures.
+Incremental rule: for the selected `spec_id` and split, run only pairs with no row in
+`extractions` for that `(pdf_hash, spec_id)`. Old spec versions' results stay put —
+re-running spec v2 after trying v3 costs nothing.
 
 ## 5. Evaluation — `gold.eval_results`
 
 Join `extractions` to `ground_truth` on `(pair_id, field_name)`, aggregate per
-`(prompt_id, split, doc_type, field_name)`:
+`(spec_id, split, doc_type, field_name)`:
 
 - `n`, `exact_match_rate`, `normalized_match_rate` (case/whitespace/number-format
   normalization — money and dates need canonicalization before comparing)
@@ -214,22 +222,22 @@ Join `extractions` to `ground_truth` on `(pair_id, field_name)`, aggregate per
   confidence threshold non-coders use for "auto-accept vs human review" must reflect
   that.
 
-A Databricks AI/BI dashboard on this table gives the iteration surface: prompt A vs
-prompt B per field, per doc type, on `val` — plus the calibration plot.
+A Databricks AI/BI dashboard on this table gives the iteration surface: spec A vs
+spec B per field, per doc type, on `val` — plus the calibration plot.
 
 ## 6. The iteration loop (what a non-coder actually does)
 
 1. **Discover** (scheduled): volume → `doc_pairs` → new PDFs parsed → new XMLs parsed.
    Splits auto-assigned for new clients.
-2. **Write a prompt**: add a row to `gold.prompts` via a small widget notebook or
-   Databricks App form (pick doc type, paste prompt, auto-versioned id).
-3. **Run extraction** (job with one dropdown: `prompt_id`): extracts the **dev** split
-   only, skipping anything already extracted for that prompt.
-4. **Look at the dashboard**: field-level accuracy vs the previous prompt, citation
-   verification rate, calibration. Iterate → back to step 2.
-5. **Promote**: when a prompt wins on dev, run the same job against `val` to confirm the
+2. **Write a spec**: add a row to `gold.extract_specs` via a small widget notebook or
+   Databricks App form (pick doc type, edit the field descriptions, auto-versioned id).
+3. **Run extraction** (job with one dropdown: `spec_id`): extracts the **dev** split
+   only, skipping anything already extracted for that spec.
+4. **Look at the dashboard**: field-level accuracy vs the previous spec, null rates,
+   calibration. Iterate → back to step 2.
+5. **Promote**: when a spec wins on dev, run the same job against `val` to confirm the
    win generalizes. Iterate on dev, *confirm* on val.
-6. **Final eval** (separate, manually-triggered, ideally rare): run the chosen prompt on
+6. **Final eval** (separate, manually-triggered, ideally rare): run the chosen spec on
    `test`. This is the number you report.
 
 ## 7. No-reprocess rules, in one table
@@ -239,7 +247,7 @@ prompt B per field, per doc type, on `val` — plus the calibration plot.
 | pair discovery | `pdf_path` (MERGE) | file content changed (hash differs) |
 | `ai_parse_document` | `pdf_hash` | new/changed PDF, or deliberate `parse_version` bump |
 | XML ground truth | `xml_hash` | new/changed XML |
-| extraction | `(pdf_hash, prompt_id)` | new document or new prompt version |
+| extraction | `(pdf_hash, spec_id)` | new document or new spec version |
 | eval | derived | cheap — recompute freely |
 
 ## 8. Build order
@@ -248,7 +256,8 @@ prompt B per field, per doc type, on `val` — plus the calibration plot.
    add hashing + MERGE) — this answers "get the mappings into Delta in one go": yes.
 2. `silver.parsed_docs` incremental job.
 3. `silver.ground_truth` + `field_map` for the first doc type.
-4. `gold.prompts` + extraction job with structured output + citation verification.
+4. `gold.extract_specs` + extraction job (`ai_extract` v2.1 with confidence +
+   citations, offsets materialized to text).
 5. `gold.eval_results` + dashboard.
 6. Widget notebook / App front-end for steps 2–4 of the iteration loop.
 
@@ -257,7 +266,8 @@ prompt B per field, per doc type, on `val` — plus the calibration plot.
 - **Split ratios** default 10/20/70 (dev/val/test); with few clients per doc type,
   check per-doc-type balance after assignment and pin manually if a doc type has no
   dev representation.
-- **Model choice** lives in the prompt registry, so comparing models is the same
-  workflow as comparing prompts.
+- **Model choice**: `ai_extract` manages its own model; for `ai_query` escape-hatch
+  specs the model lives in the registry, so comparing models is the same workflow as
+  comparing specs.
 - **Long documents**: if `parsed_text` exceeds the context window, chunk by page ranges
   at extraction time — the stored parse output already supports this without re-parsing.
