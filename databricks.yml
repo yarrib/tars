@@ -1,0 +1,29 @@
+bundle:
+  name: tars
+
+artifacts:
+  tars_wheel:
+    type: whl
+    path: .
+    build: python -m build --wheel
+
+variables:
+  catalog:
+    description: Unity Catalog catalog for all tars tables
+    default: main
+  schema:
+    description: Schema holding the tars tables
+    default: tars
+  volume_root:
+    description: Volume path containing <doc_type>/<client>/... documents
+    default: /Volumes/main/tars/docs
+
+include:
+  - resources/*.yml
+
+targets:
+  dev:
+    mode: development
+    default: true
+  prod:
+    mode: production

@@ -1,0 +1,79 @@
+# Three jobs, mirroring the design's iteration loop:
+#   tars_discover   — scheduled/on-demand: manifest -> parse -> ground truth
+#   tars_extract    — the non-coder iteration button: one spec, dev/val only
+#   tars_final_eval — manual, rare: runs the frozen test split
+
+resources:
+  jobs:
+    tars_discover:
+      name: "tars — discover & prepare"
+      environments: &env
+        - environment_key: default
+          spec:
+            client: "2"
+            dependencies:
+              - ./dist/*.whl
+      tasks:
+        - task_key: discover
+          environment_key: default
+          python_wheel_task:
+            package_name: tars
+            entry_point: tars
+            parameters: ["discover", "--catalog", "${var.catalog}",
+                         "--schema", "${var.schema}",
+                         "--volume-root", "${var.volume_root}"]
+        - task_key: parse
+          depends_on: [{task_key: discover}]
+          environment_key: default
+          python_wheel_task:
+            package_name: tars
+            entry_point: tars
+            parameters: ["parse", "--catalog", "${var.catalog}",
+                         "--schema", "${var.schema}",
+                         "--volume-root", "${var.volume_root}"]
+        - task_key: ground_truth
+          depends_on: [{task_key: discover}]
+          environment_key: default
+          python_wheel_task:
+            package_name: tars
+            entry_point: tars
+            parameters: ["ground-truth", "--catalog", "${var.catalog}",
+                         "--schema", "${var.schema}",
+                         "--volume-root", "${var.volume_root}"]
+
+    tars_extract:
+      name: "tars — run extraction spec (dev/val)"
+      parameters:
+        - name: spec_id
+          default: ""
+        - name: split
+          default: "dev"
+      environments: *env
+      tasks:
+        - task_key: extract_and_eval
+          environment_key: default
+          python_wheel_task:
+            package_name: tars
+            entry_point: tars
+            parameters: ["extract", "--catalog", "${var.catalog}",
+                         "--schema", "${var.schema}",
+                         "--volume-root", "${var.volume_root}",
+                         "--spec-id", "{{job.parameters.spec_id}}",
+                         "--split", "{{job.parameters.split}}"]
+
+    tars_final_eval:
+      name: "tars — FINAL EVAL on test holdout (manual)"
+      parameters:
+        - name: spec_id
+          default: ""
+      environments: *env
+      tasks:
+        - task_key: final_eval
+          environment_key: default
+          python_wheel_task:
+            package_name: tars
+            entry_point: tars
+            parameters: ["final-eval", "--catalog", "${var.catalog}",
+                         "--schema", "${var.schema}",
+                         "--volume-root", "${var.volume_root}",
+                         "--spec-id", "{{job.parameters.spec_id}}"]

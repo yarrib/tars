@@ -1,0 +1,26 @@
+{
+  "taxpayer_name": {
+    "type": "string",
+    "description": "Primary taxpayer's full name as printed at the top of the return"
+  },
+  "ssn_last4": {
+    "type": "string",
+    "description": "Last four digits of the primary taxpayer's SSN, digits only"
+  },
+  "filing_status": {
+    "type": "string",
+    "description": "One of: single, married filing jointly, married filing separately, head of household, qualifying surviving spouse"
+  },
+  "total_income": {
+    "type": "number",
+    "description": "Total income, line 9, as a plain number with no currency symbol or thousands separators"
+  },
+  "total_tax": {
+    "type": "number",
+    "description": "Total tax, line 24, as a plain number with no currency symbol or thousands separators"
+  },
+  "tax_year": {
+    "type": "string",
+    "description": "Four-digit tax year the return covers"
+  }
+}
