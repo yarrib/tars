@@ -1,6 +1,6 @@
 # tars v2 — AI extraction & evaluation for tax documents on Databricks
 
-Config-driven pipeline that lets non-coders run and iterate LLM extraction over
+Databricks pipeline that lets non-coders run and iterate LLM extraction over
 tax documents, with per-field confidence scores, offset-grounded citations, and
 an evaluation loop against ground-truth XMLs. Architecture rationale lives in
 [docs/design/extraction-eval-design.md](docs/design/extraction-eval-design.md).
